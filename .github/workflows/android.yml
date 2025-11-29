@@ -5,8 +5,8 @@ permissions:
 
 on:
   schedule:
-    - cron: '45 18 * * *'  # Runs daily at 6:45 PM UTC (2:45 AM PH Time)
-  workflow_dispatch:       # Manual trigger
+    - cron: '45 18 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -25,10 +25,31 @@ jobs:
           java-version: 17
           cache: 'gradle'
 
-      - name: Setup Gradle 8.7
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 8.7
+
+      - name: Create minimal Gradle files if missing
+        run: |
+          # Create settings.gradle if missing
+          if [ ! -f settings.gradle ]; then
+            echo "pluginManagement {
+  repositories {
+    google()
+    mavenCentral()
+    gradlePluginPortal()
+  }
+}
+dependencyResolutionManagement {
+  repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+rootProject.name = \"MDM\"
+include ':app'" > settings.gradle
+          fi
 
       - name: Create dummy green launcher icon
         run: |
