@@ -1,32 +1,49 @@
-name: MDM Build
+name: MDM Nightly Build
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+  schedule:
+    - cron: '45 18 * * *'  # Daily at 6:45 PM UTC (2:45 AM PH Time)
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+        - debug
+        - release
+      skip_tests:
+        description: 'Skip tests'
+        required: false
+        type: boolean
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Setup JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+          cache: 'gradle'
 
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
-    - name: Create settings.gradle
-      run: |
-        echo "pluginManagement {
+      - name: Create settings.gradle
+        run: |
+          echo "pluginManagement {
   repositories {
     google()
     mavenCentral()
@@ -44,26 +61,111 @@ dependencyResolutionManagement {
 rootProject.name = \"MDM\"
 include ':app'" > settings.gradle
 
-    - name: Create launcher icons
-      run: |
-        mkdir -p app/src/main/res/mipmap-hdpi
-        mkdir -p app/src/main/res/mipmap-mdpi
-        mkdir -p app/src/main/res/mipmap-xhdpi
-        
-        # Create simple green launcher icon
-        echo "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABGSURBVGhD7c0xAQAgDAAx/Dsm2Ckw0OOmJwAA4J8TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsOcCbK8DKJdM3s0AAAAASUVORK5CYII=" | base64 -d > app/src/main/res/mipmap-mdpi/ic_launcher.png
-        cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-hdpi/ic_launcher.png
-        cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher.png
+      - name: Create dummy launcher icons
+        run: |
+          mkdir -p app/src/main/res/mipmap-hdpi
+          mkdir -p app/src/main/res/mipmap-mdpi
+          mkdir -p app/src/main/res/mipmap-xhdpi
+          mkdir -p app/src/main/res/mipmap-xxhdpi
+          mkdir -p app/src/main/res/mipmap-xxxhdpi
+          
+          # Create simple green launcher icon using base64
+          echo "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAABGSURBVGhD7c0xAQAgDAAx/Dsm2Ckw0OOmJwAA4J8TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsOcCbK8DKJdM3s0AAAAASUVORK5CYII=" | base64 -d > app/src/main/res/mipmap-mdpi/ic_launcher.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-hdpi/ic_launcher.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
 
-    - name: Build with Gradle
-      run: gradle build
+      - name: Build APK
+        run: |
+          if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
+            gradle assembleRelease
+          else
+            gradle assembleDebug
+          fi
 
-    - name: Build APK
-      run: gradle assembleDebug
+      - name: Run tests
+        if: ${{ !github.event.inputs.skip_tests }}
+        run: gradle test
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: MDM-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
-        retention-days: 7
+      - name: Install apksigner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apksigner
+
+      - name: Create dummy keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore dummy.keystore \
+            -storepass test1234 \
+            -alias dummykey \
+            -keypass test1234 \
+            -dname "CN=MDM, OU=MDM, O=MDM, L=Test, S=Test, C=PH" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
+
+      - name: Sign APK with apksigner
+        run: |
+          if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
+            APK_PATH="app/build/outputs/apk/release/app-release-unsigned.apk"
+            OUTPUT_APK="MDM-release.apk"
+          else
+            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+            OUTPUT_APK="MDM-debug.apk"
+          fi
+          
+          apksigner sign \
+            --ks dummy.keystore \
+            --ks-key-alias dummykey \
+            --ks-pass pass:test1234 \
+            --key-pass pass:test1234 \
+            --out $OUTPUT_APK \
+            $APK_PATH
+
+      - name: Verify APK signature
+        run: |
+          if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
+            apksigner verify MDM-release.apk
+          else
+            apksigner verify MDM-debug.apk
+          fi
+
+      - name: Get current date time in PH time
+        id: datetime
+        run: |
+          PH_TIME=$(TZ='Asia/Manila' date +'%Y%m%d_%I%M%p')
+          echo "filename_time=$PH_TIME" >> $GITHUB_OUTPUT
+
+      - name: Create zip file with APK
+        run: |
+          if [ "${{ github.event.inputs.build_type }}" == "release" ]; then
+            mv MDM-release.apk "MDM_${{ steps.datetime.outputs.filename_time }}_release.apk"
+            zip "MDM_build_${{ steps.datetime.outputs.filename_time }}_release.zip" \
+              "MDM_${{ steps.datetime.outputs.filename_time }}_release.apk"
+          else
+            mv MDM-debug.apk "MDM_${{ steps.datetime.outputs.filename_time }}_debug.apk"
+            zip "MDM_build_${{ steps.datetime.outputs.filename_time }}_debug.zip" \
+              "MDM_${{ steps.datetime.outputs.filename_time }}_debug.apk"
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MDM-build-${{ steps.datetime.outputs.filename_time }}
+          path: |
+            MDM_build_${{ steps.datetime.outputs.filename_time }}_*.zip
+            app/build/reports/
+          retention-days: 30
+
+      - name: Build summary
+        run: |
+          echo "🎉 MDM Build Completed Successfully!"
+          echo "📱 Build Type: ${{ github.event.inputs.build_type || 'debug' }}"
+          echo "⏰ PH Time: ${{ steps.datetime.outputs.filename_time }}"
+          echo "📦 Artifacts uploaded to workflow run"
